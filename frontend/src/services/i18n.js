@@ -78,10 +78,13 @@ const translations = {
 };
 
 let currentLang = localStorage.getItem('mw_lang') || 'en';
+if (!translations[currentLang]) currentLang = 'en';
 
 window.i18n = {
     t(key) {
-        return translations[currentLang][key] || key;
+        return (translations[currentLang] && translations[currentLang][key])
+            || translations.en[key]
+            || key;
     },
     setLang(lang) {
         if (translations[lang]) {
