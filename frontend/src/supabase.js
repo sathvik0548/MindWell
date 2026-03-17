@@ -5,20 +5,64 @@
  * Local mock storage (mockDB) has been removed.
  */
 
-const SUPABASE_URL = 'https://gngpqrevevvjdicgblmz.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImduZ3BxcmV2ZXZ2amRpY2dibG16Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2ODE1NTksImV4cCI6MjA4OTI1NzU1OX0.YTCCwCh54lLQtiOIFB3caXPmdXnmc_yOYIO39InLqek';
+// Prefer Vite env vars if present (works in `vite dev/build`).
+// Fallbacks keep the app runnable when served as plain static files.
+const VITE_ENV = (import.meta && import.meta.env) ? import.meta.env : {};
+const SUPABASE_URL =
+    VITE_ENV.VITE_SUPABASE_URL ||
+    'https://gngpqrevevvjdicgblmz.supabase.co';
+const SUPABASE_ANON_KEY =
+    VITE_ENV.VITE_SUPABASE_ANON_KEY ||
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImduZ3BxcmV2ZXZ2amRpY2dibG16Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2ODE1NTksImV4cCI6MjA4OTI1NzU1OX0.YTCCwCh54lLQtiOIFB3caXPmdXnmc_yOYIO39InLqek';
 
 // ── Supabase client ────────────────────────────────────────────
 let _supabase = null;
 if (typeof window.supabase !== 'undefined') {
-    _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: {
+            persistSession: true,
+            autoRefreshToken: true,
+            detectSessionInUrl: true
+        }
+    });
     console.log('[MindWell] ✅ Supabase client initialized');
+    // app.js expects this global for email-confirm + OAuth return flows.
+    window._supabase = _supabase;
 } else {
     console.error('[MindWell] ❌ Supabase JS not loaded — check CDN script in index.html');
 }
 
 // ── Persistent Session State ──────────────────────────────────
 let _currentUser = null;
+
+function _syncCurrentUserFromSupabaseUser(u) {
+    if (!u) return null;
+    _currentUser = {
+        uid: u.id,
+        id: u.id,
+        name: u.user_metadata?.full_name || u.email.split('@')[0],
+        email: u.email,
+        provider: u.app_metadata?.provider || 'email',
+        createdAt: u.created_at
+    };
+    return _currentUser;
+}
+
+async function _ensureProfileForSupabaseUser(u) {
+    if (!_supabase || !u?.id) return;
+    const fullName =
+        u.user_metadata?.full_name ||
+        u.user_metadata?.name ||
+        (u.email ? u.email.split('@')[0] : 'User');
+    const email = u.email || null;
+
+    const { error } = await _supabase.from('profiles').upsert({
+        id: u.id,
+        full_name: fullName,
+        email
+    });
+    if (error) console.warn('[MindWell] Profile upsert warning:', error.message);
+}
 
 // ── Session Restoration ─────────────────────────────────────────
 async function _initSession() {
@@ -27,16 +71,9 @@ async function _initSession() {
         const { data: { session }, error } = await _supabase.auth.getSession();
         if (error) { console.warn('[MindWell] Session error:', error.message); return; }
         if (session?.user) {
-            const u = session.user;
-            _currentUser = {
-                uid: u.id,
-                id: u.id,
-                name: u.user_metadata?.full_name || u.email.split('@')[0],
-                email: u.email,
-                provider: u.app_metadata?.provider || 'email',
-                createdAt: u.created_at
-            };
-            console.log('[MindWell] ✅ Session restored for:', u.email);
+            _syncCurrentUserFromSupabaseUser(session.user);
+            await _ensureProfileForSupabaseUser(session.user);
+            console.log('[MindWell] ✅ Session restored for:', session.user.email);
         } else {
             console.log('[MindWell] No active session');
         }
@@ -44,52 +81,31 @@ async function _initSession() {
         console.error('[MindWell] Session restore failed:', e.message);
     }
 }
-_initSession();
+// app.js can await this to avoid races on initial load (especially after OAuth redirects).
+window.__mindwellAuthInit = _initSession();
+
+// Keep local user state in sync with Supabase session (fixes "logged in then bounced to login").
+if (_supabase) {
+    _supabase.auth.onAuthStateChange(async (event, session) => {
+        try {
+            if (session?.user) {
+                _syncCurrentUserFromSupabaseUser(session.user);
+                await _ensureProfileForSupabaseUser(session.user);
+                console.log('[MindWell] Auth event:', event, session.user.email);
+            } else {
+                _currentUser = null;
+                console.log('[MindWell] Auth event:', event, '(signed out)');
+            }
+        } catch (e) {
+            console.warn('[MindWell] Auth state sync warning:', e.message);
+        }
+    });
+}
 
 // ── Auth API ────────────────────────────────────────────────────
 const Auth = {
     currentUser() {
         return _currentUser;
-    },
-
-    async registerWithEmail({ name, email, password }) {
-        const { data, error } = await _supabase.auth.signUp({
-            email, password,
-            options: { data: { full_name: name } }
-        });
-
-        if (error) throw new Error(error.message);
-
-        if (data.user) {
-            _currentUser = {
-                uid: data.user.id, id: data.user.id,
-                name, email: data.user.email, provider: 'email',
-                createdAt: data.user.created_at
-            };
-            // Create profile entry
-            const { error: upsertError } = await _supabase.from('profiles').upsert({ id: data.user.id, full_name: name, email });
-            if (upsertError) console.warn('[MindWell] Profile upsert warning:', upsertError.message);
-        }
-        return data;
-    },
-
-    async verifyEmailOTP() {
-        // Bypass for demo - assuming session is handled by signUp/signIn
-        return { session: { access_token: 'demo' }, user: _currentUser };
-    },
-
-    async signInWithEmail({ email, password }) {
-        const { data, error } = await _supabase.auth.signInWithPassword({ email, password });
-        if (error) throw new Error(error.message);
-        if (data.user) {
-            const u = data.user;
-            _currentUser = {
-                uid: u.id, id: u.id,
-                name: u.user_metadata?.full_name || email.split('@')[0],
-                email: u.email, provider: 'email'
-            };
-        }
-        return data;
     },
 
     async signInWithGoogle() {
@@ -109,10 +125,14 @@ const Auth = {
         }
     },
 
-    // Legacy stubs
-    async sendOTP() { return {}; },
-    async verifyOTP() { return {}; }
+    // Legacy stubs (kept to avoid breaking older callers)
+    async sendOTP() { throw new Error('Disabled: email/phone auth removed'); },
+    async verifyOTP() { throw new Error('Disabled: email/phone auth removed'); }
 };
+
+// Internal helper for app.js confirm-email + OAuth return flows.
+Auth._syncFromSupabaseUser = _syncCurrentUserFromSupabaseUser;
+Auth._ensureProfileForSupabaseUser = _ensureProfileForSupabaseUser;
 
 // ── DB Helpers ──────────────────────────────────────────────────
 function _getUID() {

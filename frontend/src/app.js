@@ -114,6 +114,17 @@ window.toggleLang = async function () {
 async function navigateTo(page, param) {
   const app = document.getElementById('app');
   if (page === 'dashboard') {
+    // Avoid racing session restoration (common right after OAuth redirects / page reload).
+    if (!Auth.currentUser()) {
+      try { await window.__mindwellAuthInit; } catch (_) { }
+    }
+    if (!Auth.currentUser() && window._supabase) {
+      const { data } = await window._supabase.auth.getSession();
+      if (data?.session?.user) {
+        window.Auth?._syncFromSupabaseUser?.(data.session.user);
+        await window.Auth?._ensureProfileForSupabaseUser?.(data.session.user);
+      }
+    }
     if (!Auth.currentUser()) { await navigateTo('auth', 'register'); return; }
     app.innerHTML = await renderDashboard();
     return;
@@ -131,24 +142,25 @@ window.navigateTo = navigateTo;
   const params = new URLSearchParams(window.location.search);
   const tokenHash = params.get('token_hash');
   const type = params.get('type');
+  const oauthCode = params.get('code');
+
+  // Avoid race: wait for initial session restoration (important after OAuth redirects)
+  try { await window.__mindwellAuthInit; } catch (_) { }
 
   // Handle email confirmation redirect (Supabase sends ?token_hash=...&type=signup)
   if (tokenHash && type) {
     try {
       showLoader('Verifying your account…');
+      if (!window._supabase) throw new Error('Supabase client not initialized');
       const { data, error } = await window._supabase.auth.verifyOtp({ token_hash: tokenHash, type });
       hideLoader();
       if (error) {
         showToast('Verification failed: ' + error.message, 'error');
         await navigateTo('auth', 'login');
       } else if (data?.user) {
-        // Sync session
-        const u = data.user;
-        window._currentUser = {
-          uid: u.id, id: u.id,
-          name: u.user_metadata?.full_name || u.email.split('@')[0],
-          email: u.email, provider: 'email', createdAt: u.created_at
-        };
+        // Sync session into Auth
+        window.Auth?._syncFromSupabaseUser?.(data.user);
+        await window.Auth?._ensureProfileForSupabaseUser?.(data.user);
         // Clean up URL
         window.history.replaceState({}, document.title, window.location.pathname);
         showToast('Email confirmed! Welcome to MindWell 🌿', 'success');
@@ -163,14 +175,39 @@ window.navigateTo = navigateTo;
   }
 
   // Handle Supabase OAuth redirect (Google etc) via hash fragment
-  if (window.location.hash && window.location.hash.includes('access_token')) {
-    if (window._supabase) {
-      const { data } = await window._supabase.auth.getSession();
-      if (data?.session?.user) {
-        await navigateTo('dashboard');
-        showToast('Welcome! Signed in with Google 🎉', 'success');
+  // Supabase typically returns with `?code=...` (PKCE) or `#access_token=...` (implicit).
+  if (oauthCode || (window.location.hash && window.location.hash.includes('access_token'))) {
+    if (!window._supabase) {
+      showToast('Supabase client not initialized.', 'error');
+      await navigateTo('auth', 'login');
+      return;
+    }
+
+    // If we returned with ?code=..., explicitly exchange it for a session.
+    if (oauthCode) {
+      try {
+        const { data: exData, error: exErr } = await window._supabase.auth.exchangeCodeForSession(oauthCode);
+        if (exErr) throw exErr;
+        if (exData?.session?.user) {
+          window.Auth?._syncFromSupabaseUser?.(exData.session.user);
+          await window.Auth?._ensureProfileForSupabaseUser?.(exData.session.user);
+        }
+      } catch (e) {
+        showToast(e.message || 'Google sign-in failed.', 'error');
+        await navigateTo('auth', 'login');
         return;
       }
+    }
+
+    const { data } = await window._supabase.auth.getSession();
+    if (data?.session?.user) {
+      window.Auth?._syncFromSupabaseUser?.(data.session.user);
+      await window.Auth?._ensureProfileForSupabaseUser?.(data.session.user);
+      // Clean up URL (remove ?code=... and/or hash)
+      window.history.replaceState({}, document.title, window.location.pathname);
+      await navigateTo('dashboard');
+      showToast('Welcome! Signed in with Google 🎉', 'success');
+      return;
     }
   }
 
