@@ -41,19 +41,8 @@
   <!-- Chart.js from CDN -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-  <!-- App Scripts (order matters) -->
-  <script src="src/supabase.js"></script>
-  <script src="src/services/i18n.js"></script>
-  <script src="src/services/chatbot.js"></script>
-  <script src="src/3d-scene.js"></script>
-  <script src="src/auth.js"></script>
-  <script src="src/dashboard.js"></script>
-  <script src="src/app.js"></script>
-  <script>
-    window.addEventListener('load', () => {
-      Chatbot.init();
-    });
-  </script>
+  <!-- App Scripts (Bundled by Vite) -->
+  <script type="module" src="/src/main.js"></script>
 </body>
 
 </html>
