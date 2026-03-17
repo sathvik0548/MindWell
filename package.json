@@ -1,0 +1,13 @@
+{
+    "name": "mindwell-unified",
+    "version": "1.0.0",
+    "description": "Unified runner for MindWell frontend and backend",
+    "type": "module",
+    "scripts": {
+        "dev": "concurrently \"npm run dev --prefix frontend\" \"npm start --prefix backend\"",
+        "install-all": "npm install --prefix frontend && npm install --prefix backend"
+    },
+    "devDependencies": {
+        "concurrently": "^8.2.2"
+    }
+}

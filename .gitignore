@@ -1,0 +1,9 @@
+node_modules/
+npm-cache/
+.env
+.DS_Store
+dist/
+*.nosync
+permissions_test_file
+test_dir/
+.npm/

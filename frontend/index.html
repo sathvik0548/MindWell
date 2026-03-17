@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description"
+    content="MindWell – Your calm digital companion for mental health awareness, mood tracking, and well-being guidance." />
+  <title>MindWell – Mental Health &amp; Well-being Platform</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap"
+    rel="stylesheet">
+
+  <!-- Main Stylesheet -->
+  <link rel="stylesheet" href="src/styles.css" />
+</head>
+
+<body>
+
+  <!-- 3D Canvas Background -->
+  <canvas id="bg-canvas"></canvas>
+
+  <!-- App Root -->
+  <div id="app">
+    <!-- Pages are injected by app.js -->
+  </div>
+
+  <!-- Toast Notifications -->
+  <div id="toast-container"></div>
+
+  <!-- Three.js from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+  <!-- Supabase JS Client from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+  <!-- Chart.js from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- App Scripts (order matters) -->
+  <script src="src/supabase.js"></script>
+  <script src="src/services/i18n.js"></script>
+  <script src="src/services/chatbot.js"></script>
+  <script src="src/3d-scene.js"></script>
+  <script src="src/auth.js"></script>
+  <script src="src/dashboard.js"></script>
+  <script src="src/app.js"></script>
+  <script>
+    window.addEventListener('load', () => {
+      Chatbot.init();
+    });
+  </script>
+</body>
+
+</html>
